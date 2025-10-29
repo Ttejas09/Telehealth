@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Patient Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <!-- This 'patient-page' ID lets our script.js know what logic to run -->
+  <body id="patient-page" class="state-pre-call">
+    <header>
+      <h1>Patient Portal</h1>
+    </header>
+
+    <main>
+      <div class="video-grid">
+        <div class="video-box">
+          <video id="localVideo" muted autoplay playsinline></video>
+          <div class="video-label">Your Camera</div>
+        </div>
+        <div class="video-box">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div class="video-label">Doctor's Camera</div>
+        </div>
+      </div>
+
+      <div class="controls-container">
+        <div id="status-bar">Please start your camera to check-in.</div>
+
+        <!-- Step 1: Pre-call -->
+        <div class="controls-setup">
+          <input
+            type="text"
+            id="nameInput"
+            placeholder="Enter Your Name"
+          />
+          <input
+            type="text"
+            id="doctorRoomIdInput"
+            placeholder="Enter Doctor's Room ID"
+          />
+          <button id="startCameraButton" class="btn btn-primary">
+            Start Camera
+          </button>
+          <button id="checkInButton" class="btn btn-secondary">
+            Check-in to Waiting Room
+          </button>
+        </div>
+
+        <!-- Step 2: Waiting -->
+        <div class="controls-waiting">
+          <h2>You are in the waiting room.</h2>
+          <p>The doctor will start the call shortly.</p>
+        </div>
+
+        <!-- NEW: Step 2.5: Ringing -->
+        <div class="controls-ringing">
+          <h2 id="ringing-status">The doctor is calling...</h2>
+          <button id="answerButton" class="btn btn-primary">Answer</button>
+          <button id="declineButton" class="btn btn-danger">Decline</button>
+        </div>
+        
+        <!-- Step 3: In Call -->
+        <div class="controls-in-call">
+          <button id="hangUpButton" class="btn btn-danger">Hang Up</button>
+        </div>
+      </div>
+    </main>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>
+

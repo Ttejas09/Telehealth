@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Doctor Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <!-- This links to the style.css file you should also have -->
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <!-- This 'doctor-page' ID lets our script.js know what logic to run -->
+  <body id="doctor-page" class="state-pre-call">
+    <header>
+      <h1>Doctor Portal</h1>
+    </header>
+
+    <main>
+      <div class="video-grid">
+        <div class="video-box">
+          <video id="localVideo" muted autoplay playsinline></video>
+          <div class="video-label">Your Camera</div>
+        </div>
+        <div class="video-box">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div class="video-label">Patient's Camera</div>
+        </div>
+      </div>
+
+      <div class="controls-container">
+        <div id="status-bar">Please start your camera to open your office.</div>
+
+        <!-- Step 1: Pre-call -->
+        <div class="controls-setup">
+          <input
+            type="text"
+            id="roomIdInput"
+            placeholder="Enter Your Office Room ID"
+          />
+          <button id="startCameraButton" class="btn btn-primary">
+            Start Camera
+          </button>
+          <button id="joinRoomButton" class="btn btn-secondary">
+            Open Office
+          </button>
+        </div>
+
+        <!-- Step 2: Waiting Room / Lobby -->
+        <div class="lobby-container">
+          <h2>Waiting Room</h2>
+          <ul id="lobbyList">
+            <!-- Patients will be added here by JS -->
+          </ul>
+        </div>
+
+        <!-- Step 3: In Call -->
+        <div class="controls-in-call">
+          <button id="hangUpButton" class="btn btn-danger">Hang Up</button>
+        </div>
+      </div>
+    </main>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>
+
