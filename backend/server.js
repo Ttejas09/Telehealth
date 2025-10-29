@@ -2,57 +2,52 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-
-// --- NEW: Load environment variables ---
-require('dotenv').config(); 
-// --- NEW: Import Twilio ---
 const twilio = require('twilio');
+// Load environment variables from .env file
+require('dotenv').config(); 
+
+const twilioClient = require('twilio')(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 const app = express();
 const server = http.createServer(app);
 
+// Enable CORS for all routes
+// This is important for the API route
+const cors = require('cors');
+app.use(cors({
+  origin: '*' // Allow all origins for development
+}));
+
+
 const io = new Server(server, {
   cors: {
-    origin: '*', // Allow all origins for development
+    origin: '*',
     methods: ['GET', 'POST'],
   },
 });
 
-// --- NEW: Securely get Twilio credentials from .env or Render ---
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
+// --- THIS IS THE FIX ---
+// This object will store our waiting rooms (lobbies)
+const lobbies = {};
+// ----------------------
 
-// --- NEW: Create a Twilio client ---
-// Only create the client if credentials are provided
-let twilioClient;
-if (accountSid && authToken) {
-  twilioClient = twilio(accountSid, authToken);
-} else {
-  console.warn('Twilio credentials not found. TURN server will not be available.');
-}
+console.log('Server starting...');
 
-// --- NEW: API Endpoint for Frontend ---
-// This is a new route your frontend will call
+// --- API Endpoint for TURN Credentials ---
 app.get('/api/ice-servers', async (req, res) => {
-  if (!twilioClient) {
-    // If Twilio isn't set up, just return an empty array
-    // The frontend will still use the public STUN servers
-    return res.json([]);
-  }
-  
   try {
-    // Ask Twilio to generate temporary TURN server credentials
     const token = await twilioClient.tokens.create();
-    // Send them to the frontend
-    res.json(token.iceServers);
+    // 'token.iceServers' includes STUN and TURN
+    res.json(token.iceServers); 
   } catch (error) {
     console.error('Error fetching Twilio ICE servers:', error);
-    res.status(500).json({ error: 'Failed to get ICE servers' });
+    res.status(500).json({ error: 'Failed to fetch ICE servers' });
   }
 });
 
-
-console.log('Server starting...');
 
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
@@ -81,7 +76,7 @@ io.on('connection', (socket) => {
     socket.waitingForRoom = doctorRoomId;
 
     // Add patient to the lobby
-    if (!lobbies[doctorRoomId]) {
+    if (!lobbies[doctorRoomId]) { // This was the line that crashed
       lobbies[doctorRoomId] = [];
     }
     lobbies[doctorRoomId].push({ ...patientInfo, socketId: socket.id });
@@ -115,14 +110,19 @@ io.on('connection', (socket) => {
 
   // 3. General ICE candidate relay for both
   socket.on('send-ice-candidate', (data) => {
-    // console.log(`Relaying ICE candidate from ${socket.id} to ${data.toId}`);
     io.to(data.toId).emit('receive-ice-candidate', {
       fromId: socket.id,
       candidate: data.candidate,
     });
   });
+  
+  // 4. Patient declines the call
+  socket.on('call-declined-by-patient', (data) => {
+    console.log(`Patient declined call from doctor ${data.toDoctorId}`);
+    io.to(data.toDoctorId).emit('call-declined-by-patient');
+  });
 
-  // 4. Handle disconnects
+  // 5. Handle disconnects
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
@@ -130,7 +130,6 @@ io.on('connection', (socket) => {
     if (!socket.isDoctor && socket.waitingForRoom) {
       const lobby = lobbies[socket.waitingForRoom];
       if (lobby) {
-        // Filter out the disconnected patient
         lobbies[socket.waitingForRoom] = lobby.filter(
           (p) => p.socketId !== socket.id
         );
@@ -152,8 +151,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`Signaling server listening on *:${PORT}`);
 });
-

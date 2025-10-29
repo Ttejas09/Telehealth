@@ -1,8 +1,17 @@
 // --- Connect to Socket.IO Server ---
 // --- TODO #1: Replace 'localhost' with your public backend URL from Render ---
-const socket = io('https://telehealth-lxj1.onrender.com');
+const socket = io('https://telehealth-lxj1.onrender.com'); 
 
-// --- NEW: Get Backend URL for API calls ---
+// --- Log connection status ---
+socket.on('connect', () => {
+  console.log('Successfully connected to signaling server with ID:', socket.id);
+});
+socket.on('connect_error', (err) => {
+  console.error('Failed to connect to signaling server:', err.message);
+  setStatus('Error: Could not connect to server. Please refresh.');
+});
+
+// --- Get Backend URL for API calls ---
 // This makes sure we call the same server our socket is on
 const BACKEND_URL = socket.io.uri; 
 
@@ -22,7 +31,6 @@ let currentCallPartnerId; // The socket ID of the person we are in a call with
 let currentCallPartnerName; // The name of the person we are in a call with
 
 // --- WebRTC Configuration ---
-// --- REMOVED: Credentials are no longer stored here ---
 // We will fetch this from our backend
 let iceServers = [
   {
@@ -31,29 +39,25 @@ let iceServers = [
 ];
 
 
-// --- NEW: Function to fetch TURN credentials ---
+// --- Function to fetch TURN credentials ---
 async function getIceServers() {
   try {
-    // Call the new /api/ice-servers endpoint on our backend
-    // We use a cache-busting param just in case
+    // Use Date.now() to prevent caching
     const response = await fetch(`${BACKEND_URL}/api/ice-servers?_=${Date.now()}`);
     if (!response.ok) {
       throw new Error('Failed to fetch ICE servers');
     }
     const twilioIceServers = await response.json();
     
-    // Combine our free STUN servers with the Twilio TURN servers
-    // Only update if we actually got servers from Twilio
     if (twilioIceServers && twilioIceServers.length > 0) {
       iceServers = [
         ...iceServers, // The STUN servers
         ...twilioIceServers, // The TURN servers from Twilio
       ];
     }
-    // console.log('Using ICE servers:', iceServers);
+    console.log('Using ICE servers:', iceServers);
   } catch (error) {
     console.error(error);
-    // Don't alert, just log. The STUN servers might still work.
     console.warn("Warning: Could not get TURN server credentials. Call may fail on some networks.");
   }
 }
@@ -72,8 +76,8 @@ function setStatus(message) {
 
 async function startLocalCamera() {
   try {
-    // Only get stream if we don't already have one
-    if (!localStream || localStream.getTracks().length === 0 || localStream.getTracks().every(t => !t.enabled)) {
+    // Only get stream if we don't already have one or it's stopped
+    if (!localStream || localStream.getTracks().every(t => t.readyState === 'ended')) {
       localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
@@ -88,46 +92,34 @@ async function startLocalCamera() {
   }
 }
 
-// --- MODIFIED: createPeerConnection ---
 async function createPeerConnection(partnerSocketId, partnerName = 'User') {
-  // Store who we are talking to
   currentCallPartnerId = partnerSocketId;
   currentCallPartnerName = partnerName;
 
-  // --- FIX: Check for localStream FIRST ---
   if (!localStream) {
-    console.error("Local stream is not available to add to peer connection.");
+    console.error("Local stream is not available.");
     alert("Error: Your camera is not active. Please start your camera again.");
-    return false; // Stop if camera isn't working
+    return false;
   }
-
-  // --- NEW: Fetch latest TURN credentials ---
-  // This ensures we have credentials *before* creating the connection
+  
+  // Make sure we have the latest TURN servers
   await getIceServers();
 
-  // --- MODIFIED: Use the 'iceServers' variable ---
   peerConnection = new RTCPeerConnection({ iceServers: iceServers });
 
-  // Add local video/audio tracks to the connection
   localStream.getTracks().forEach((track) => {
     peerConnection.addTrack(track, localStream);
   });
 
-  // --- UPDATED 'ontrack' HANDLER ---
-  // This is the robust, modern way to handle incoming video/audio
   peerConnection.ontrack = (event) => {
     console.log('Received remote track:', event.track.kind);
-    // Create the remote stream if it doesn't exist
     if (!remoteStream) {
       remoteStream = new MediaStream();
       remoteVideo.srcObject = remoteStream;
     }
-    
-    // Add the incoming track (either audio or video) to the stream
     remoteStream.addTrack(event.track);
   };
 
-  // Find network paths (candidates) and send them to the other user
   peerConnection.onicecandidate = (event) => {
     if (event.candidate) {
       socket.emit('send-ice-candidate', {
@@ -137,15 +129,14 @@ async function createPeerConnection(partnerSocketId, partnerName = 'User') {
     }
   };
 
-  // Listen for the connection to close
   peerConnection.onconnectionstatechange = () => {
+    console.log('Connection state change:', peerConnection.connectionState);
     if (
       peerConnection.connectionState === 'disconnected' ||
       peerConnection.connectionState === 'closed' ||
       peerConnection.connectionState === 'failed'
     ) {
       if (body.className.includes('in-call')) {
-        // Find the correct handler to reset the UI
         if(document.getElementById('doctor-page')) {
           handleDoctorCallEnd();
         } else {
@@ -155,29 +146,21 @@ async function createPeerConnection(partnerSocketId, partnerName = 'User') {
     }
   };
   
-  return true; // <-- Report success
+  return true;
 }
 
-/**
- * --- MODIFIED HANGUP ---
- * This function is now ONLY responsible for cleaning up an active call.
- * It NO LONGER stops the local camera stream.
- * It NO LONGER manages the UI state (the caller does).
- */
 function cleanUpCall() {
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
   }
 
-  // Stop ONLY the remote stream
   remoteVideo.srcObject = null;
   if (remoteStream) {
     remoteStream.getTracks().forEach((track) => track.stop());
     remoteStream = null;
   }
   
-  // Tell the other user
   if (currentCallPartnerId) {
     socket.emit('hang-up', { toId: currentCallPartnerId });
     currentCallPartnerId = null;
@@ -188,21 +171,21 @@ function cleanUpCall() {
 // --- Role-specific call end handlers ---
 
 function handleDoctorCallEnd() {
-  cleanUpCall(); // Clean up the call
-  setUiState('waiting'); // Go back to lobby
+  console.log('Call ended by Doctor.');
+  cleanUpCall();
+  setUiState('waiting');
   setStatus('Call ended. Waiting for patients...');
   
-  // Re-enable lobby buttons
   const lobbyList = document.getElementById('lobbyList');
   if (lobbyList) {
-    // This check is to prevent errors if the lobby isn't visible
     lobbyList.querySelectorAll('button').forEach(btn => btn.disabled = false);
   }
 }
 
 function handlePatientCallEnd() {
-  cleanUpCall(); // Clean up the call
-  setUiState('waiting'); // Go back to waiting room
+  console.log('Call ended by Patient.');
+  cleanUpCall();
+  setUiState('waiting');
   setStatus('Call ended. The doctor will call you again if needed.');
 }
 
@@ -221,17 +204,19 @@ if (document.getElementById('doctor-page')) {
     const roomId = roomIdInput.value;
     if (!roomId) return alert('Please enter an Office Room ID');
     if (!localStream) return alert('Please start your camera first');
-
+    
+    console.log(`Doctor joining room: ${roomId}`);
     socket.emit('doctor-join-room', roomId);
     setUiState('waiting');
     setStatus(`Office is open. Waiting for patients in room: ${roomId}`);
   };
 
   socket.on('lobby-updated', (patients) => {
-    // Don't update lobby if in a call
+    console.log('Lobby updated:', patients);
+    
     if(body.className.includes('in-call') || body.className.includes('ringing')) return;
 
-    lobbyList.innerHTML = ''; // Clear list
+    lobbyList.innerHTML = '';
     if (patients.length === 0) {
       const li = document.createElement('li');
       li.textContent = 'No patients in the waiting room.';
@@ -244,27 +229,23 @@ if (document.getElementById('doctor-page')) {
         callButton.textContent = 'Call';
         callButton.className = 'btn btn-primary';
         callButton.onclick = async () => {
-          // Start the call
-          // --- FIX: Check the return value ---
-          // --- MODIFIED: Await the async function ---
+          console.log(`Doctor calling patient: ${patient.name}`);
           const connectionStarted = await createPeerConnection(patient.socketId, patient.name);
           
-          // Check if peerConnection was created successfully
           if (!connectionStarted) return; 
 
           const offer = await peerConnection.createOffer();
           await peerConnection.setLocalDescription(offer);
           
+          console.log('Sending offer to patient...');
           socket.emit('offer-to-patient', {
             toPatientId: patient.socketId,
             offer: offer,
           });
           
-          // --- DOCTOR'S 'RINGING' STATE ---
           setUiState('ringing');
           setStatus(`Calling ${patient.name}...`);
           
-          // Disable lobby buttons to prevent multiple calls
           lobbyList.querySelectorAll('button').forEach(btn => btn.disabled = true);
         };
         li.appendChild(callButton);
@@ -274,7 +255,8 @@ if (document.getElementById('doctor-page')) {
   });
 
   socket.on('call-answered-by-patient', async (data) => {
-    if (!peerConnection) return; // Call might have been cancelled
+    console.log('Call answered by patient. Setting remote description.');
+    if (!peerConnection) return;
     await peerConnection.setRemoteDescription(
       new RTCSessionDescription(data.answer)
     );
@@ -282,11 +264,10 @@ if (document.getElementById('doctor-page')) {
     setStatus(`In call with ${currentCallPartnerName || 'Patient'}`);
   });
   
-  // --- NEW: Handle if patient declines ---
   socket.on('call-declined-by-patient', () => {
+    console.log('Patient declined the call.');
     setStatus('Patient declined the call. Waiting for patients...');
     setUiState('waiting');
-    // Re-enable lobby buttons
     const lobbyList = document.getElementById('lobbyList');
     if (lobbyList) {
       lobbyList.querySelectorAll('button').forEach(btn => btn.disabled = false);
@@ -294,7 +275,6 @@ if (document.getElementById('doctor-page')) {
   });
 
 
-  // Use the new role-specific handler
   hangUpButton.onclick = handleDoctorCallEnd;
   socket.on('call-ended', handleDoctorCallEnd);
   
@@ -314,11 +294,9 @@ if (document.getElementById('doctor-page')) {
   const nameInput = document.getElementById('nameInput');
   const doctorRoomIdInput = document.getElementById('doctorRoomIdInput');
   
-  // --- NEW: Get Answer/Decline buttons ---
   const answerButton = document.getElementById('answerButton');
   const declineButton = document.getElementById('declineButton');
-
-  // --- NEW: Store incoming call data ---
+  const ringingStatus = document.getElementById('ringingStatus');
   let incomingCallData = null;
 
 
@@ -330,7 +308,8 @@ if (document.getElementById('doctor-page')) {
     if (!patientName) return alert('Please enter your name');
     if (!doctorRoomId) return alert("Please enter the Doctor's Room ID");
     if (!localStream) return alert('Please start your camera first');
-
+    
+    console.log(`Patient checking in to room: ${doctorRoomId}`);
     socket.emit('patient-check-in', {
       doctorRoomId: doctorRoomId,
       patientInfo: { name: patientName },
@@ -339,34 +318,32 @@ if (document.getElementById('doctor-page')) {
     setStatus('You are in the waiting room. The doctor will call you soon.');
   };
   
-  // --- REPLACED confirm() WITH UI STATE ---
   socket.on('call-incoming-from-doctor', async (data) => {
-    // Don't allow a call if already in one
+    console.log('Receiving call from doctor...');
     if (peerConnection) {
       console.warn("Already in a call, rejecting new one.");
-      // Tell doctor we are busy
       // socket.emit('call-rejected', { toDoctorId: data.fromDoctorId, reason: 'busy' });
       return; 
     }
     
-    // Store call data and show the ringing UI
     incomingCallData = data;
+    if (ringingStatus) {
+      ringingStatus.textContent = 'The Doctor is calling...';
+    }
     setUiState('ringing');
-    setStatus('The doctor is calling...');
+    setStatus('Incoming call...'); // This status is hidden, but good to set
   });
   
-  // --- NEW: Handle Answer Button ---
   answerButton.onclick = async () => {
+    console.log('Patient answering call...');
     if (!incomingCallData) return;
     
     const { fromDoctorId, offer } = incomingCallData;
-    incomingCallData = null; // Clear incoming call data
+    incomingCallData = null;
     
-    // --- FIX: Check return value ---
-    // --- MODIFIED: Await the async function ---
     const connectionStarted = await createPeerConnection(fromDoctorId, 'Doctor');
     if (!connectionStarted) {
-      setUiState('waiting'); // Go back to waiting if camera fails
+      setUiState('waiting');
       return; 
     }
     
@@ -375,6 +352,7 @@ if (document.getElementById('doctor-page')) {
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     
+    console.log('Sending answer to doctor...');
     socket.emit('answer-to-doctor', {
       toDoctorId: fromDoctorId,
       answer: answer,
@@ -384,10 +362,9 @@ if (document.getElementById('doctor-page')) {
     setStatus('Connected to the doctor.');
   };
 
-  // --- NEW: Handle Decline Button ---
   declineButton.onclick = () => {
+    console.log('Patient declining call.');
     if (incomingCallData) {
-      // Tell the doctor we declined
       socket.emit('call-declined-by-patient', { toDoctorId: incomingCallData.fromDoctorId });
       incomingCallData = null;
     }
@@ -396,11 +373,10 @@ if (document.getElementById('doctor-page')) {
   };
   
   
-  // Use the new role-specific handler
   hangUpButton.onclick = handlePatientCallEnd;
   socket.on('call-ended', handlePatientCallEnd);
   
-  socket.on('receive-HPC-candidate', (data) => {
+  socket.on('receive-ice-candidate', (data) => {
     if (peerConnection) {
       try {
         peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
