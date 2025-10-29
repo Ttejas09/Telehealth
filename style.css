@@ -262,3 +262,18 @@ main {
   }
 }
 
+/* --- Gradient Text Utility --- */
+.gradient-text {
+  /* 1. Create the gradient background */
+  background-image: linear-gradient(to right, #3B82F6, #14B8A6);
+
+  /* 2. Clip the background to the text */
+  -webkit-background-clip: text;
+  background-clip: text;
+
+  /* 3. Make the text color transparent */
+  color: transparent;
+  
+  /* 4. Make it a bit bolder to match */
+  font-weight: 700;
+}
