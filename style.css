@@ -28,7 +28,7 @@ body {
 header {
   text-align: center;
   padding: 1rem;
-  background: white;
+  background: rgb(109, 103, 103);
   border-bottom: 1px solid var(--border-color);
 }
 
