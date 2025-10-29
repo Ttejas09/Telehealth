@@ -28,7 +28,7 @@ body {
 header {
   text-align: center;
   padding: 1rem;
-  background: rgb(252, 251, 255);
+  background: linear-gradient(to right, #24e9e9, #2629eb);
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -265,7 +265,7 @@ main {
 /* --- Gradient Text Utility --- */
 .gradient-text {
   /* 1. Create the gradient background */
-  background-image: linear-gradient(to right, #24e9e9, #2629eb);
+  background-image: linear-gradient(to right, #ffffff, #ffffff);
 
   /* 2. Clip the background to the text */
   -webkit-background-clip: text;
