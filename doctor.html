@@ -4,68 +4,494 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Doctor Portal</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap"
-      rel="stylesheet"
-    />
-    <!-- This links to the style.css file you should also have -->
-    <link rel="stylesheet" href="style.css" />
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Use Inter font */
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      /* Video element styling */
+      video {
+        width: 100%;
+        height: auto;
+        border-radius: 0.5rem;
+        background-color: #334155; /* slate-700 */
+        transform: scaleX(-1); /* Mirror local video */
+      }
+      #remoteVideo {
+        transform: scaleX(-1); /* Mirror remote video as well */
+      }
+    </style>
   </head>
-  <!-- This 'doctor-page' ID lets our script.js know what logic to run -->
-  <body id="doctor-page" class="state-pre-call">
-    <header>
-      <h1>Doctor Portal</h1>
+  <body class="bg-slate-100 min-h-screen">
+    <header
+      class="bg-white shadow-md w-full p-4 flex items-center justify-between"
+    >
+      <h1 class="text-2xl font-bold text-blue-800">Doctor Portal</h1>
+      <div class="text-sm text-gray-600">
+        Your ID: <span id="userId" class="font-medium text-gray-800">...</span>
+      </div>
     </header>
 
-    <main>
-      <div class="video-grid">
-        <div class="video-box">
-          <video id="localVideo" muted autoplay playsinline></video>
-          <div class="video-label">Your Camera</div>
-        </div>
-        <div class="video-box">
-          <video id="remoteVideo" autoplay playsinline></video>
-          <div class="video-label">Patient's Camera</div>
-        </div>
-      </div>
-
-      <div class="controls-container">
-        <div id="status-bar">Please start your camera to open your office.</div>
-
-        <!-- Step 1: Pre-call -->
-        <div class="controls-setup">
-          <input
-            type="text"
-            id="roomIdInput"
-            placeholder="Enter Your Office Room ID"
-          />
-          <button id="startCameraButton" class="btn btn-primary">
-            Start Camera
-          </button>
-          <button id="joinRoomButton" class="btn btn-secondary">
-            Open Office
-          </button>
-        </div>
-
-        <!-- Step 2: Waiting Room / Lobby -->
-        <div class="lobby-container">
-          <h2>Waiting Room</h2>
-          <ul id="lobbyList">
-            <!-- Patients will be added here by JS -->
-          </ul>
+    <main class="container mx-auto p-4 max-w-7xl">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Left Column: Waiting Room -->
+        <div class="lg:col-span-1 bg-white p-6 rounded-lg shadow-lg">
+          <h2 class="text-xl font-semibold mb-4 border-b pb-2">
+            Waiting Room
+          </h2>
+          <div class="mb-4">
+            <input
+              type="text"
+              id="doctorRoomIdInput"
+              placeholder="Enter Your Room ID to Open"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              id="openRoomButton"
+              class="mt-2 w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-300"
+            >
+              Open Waiting Room
+            </button>
+          </div>
+          <div id="patient-list" class="space-y-3">
+            <!-- Patient items will be injected here -->
+            <p id="no-patients" class="text-gray-500">
+              No patients waiting.
+            </p>
+          </div>
         </div>
 
-        <!-- Step 3: In Call -->
-        <div class="controls-in-call">
-          <button id="hangUpButton" class="btn btn-danger">Hang Up</button>
+        <!-- Right Column: Call Interface -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-lg">
+          <div id="status-bar" class="text-lg font-medium text-slate-700 mb-4 text-center">
+            Please open your waiting room to see patients.
+          </div>
+          
+          <!-- Video Grid -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div class="video-box bg-slate-50 p-2 rounded-lg shadow-inner">
+              <video id="localVideo" muted autoplay playsinline></video>
+              <div class="video-label text-center text-gray-700 font-medium mt-2">
+                Your Camera
+              </div>
+            </div>
+            <div class="video-box bg-slate-50 p-2 rounded-lg shadow-inner">
+              <video id="remoteVideo" autoplay playsinline></video>
+              <div class="video-label text-center text-gray-700 font-medium mt-2" id="remoteVideoLabel">
+                Patient's Camera
+              </div>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="text-center">
+            <button
+              id="hangUpButton"
+              class="bg-red-500 text-white font-bold py-3 px-8 rounded-lg hover:bg-red-600 transition duration-300 text-lg"
+              disabled
+            >
+              Hang Up
+            </button>
+          </div>
         </div>
       </div>
     </main>
 
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="script.js"></script>
+    <!-- 
+      This <script type="module"> block contains all the JavaScript logic 
+      for the Doctor Portal, including Firebase and WebRTC.
+    -->
+    <script type="module">
+      // Import Firebase modules
+      import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+      import {
+        getAuth,
+        signInAnonymously,
+        signInWithCustomToken,
+        onAuthStateChanged,
+      } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+      import {
+        getFirestore,
+        doc,
+        setDoc,
+        onSnapshot,
+        collection,
+        addDoc,
+        updateDoc,
+        deleteDoc,
+        getDocs,
+        writeBatch,
+        setLogLevel,
+      } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+      // --- Global Variables & Config ---
+
+      // Get app ID and Firebase config
+      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+      const firebaseConfig = JSON.parse(
+        typeof __firebase_config !== 'undefined'
+          ? __firebase_config
+          : '{}'
+      );
+      const initialAuthToken =
+        typeof __initial_auth_token !== 'undefined'
+          ? __initial_auth_token
+          : null;
+
+      // Firebase services
+      let app, db, auth;
+      let userId, doctorName; // Doctor's name (can be set from input)
+      
+      // WebRTC variables
+      let pc; // PeerConnection
+      let localStream;
+      let remoteStream;
+      let currentPatientDocRef;
+      let patientListUnsubscribe; // Function to stop listening to patient list
+
+      // STUN server configuration
+      const servers = {
+        iceServers: [
+          {
+            urls: [
+              'stun:stun1.l.google.com:19302',
+              'stun:stun2.l.google.com:19302',
+            ],
+          },
+        ],
+        iceCandidatePoolSize: 10,
+      };
+
+      // DOM Elements
+      const localVideo = document.getElementById('localVideo');
+      const remoteVideo = document.getElementById('remoteVideo');
+      const openRoomButton = document.getElementById('openRoomButton');
+      const doctorRoomIdInput = document.getElementById('doctorRoomIdInput');
+      const hangUpButton = document.getElementById('hangUpButton');
+      const statusBar = document.getElementById('status-bar');
+      const userIdSpan = document.getElementById('userId');
+      const patientList = document.getElementById('patient-list');
+      const noPatientsMessage = document.getElementById('no-patients');
+      const remoteVideoLabel = document.getElementById('remoteVideoLabel');
+
+      // --- Initialization ---
+
+      async function initialize() {
+        if (Object.keys(firebaseConfig).length === 0) {
+          console.error("Firebase config is missing.");
+          statusBar.textContent = "Error: App configuration is missing.";
+          return;
+        }
+        
+        try {
+          // Initialize Firebase
+          app = initializeApp(firebaseConfig);
+          db = getFirestore(app);
+          auth = getAuth(app);
+          setLogLevel('Debug');
+
+          // Sign in
+          onAuthStateChanged(auth, async (user) => {
+            if (user) {
+              userId = user.uid;
+              userIdSpan.textContent = userId;
+              // Simple name prompt for demo
+              doctorName = prompt("What is your name, Doctor?") || "Dr. Smith";
+              console.log(`Doctor ${doctorName} signed in with ID:`, userId);
+            } else {
+              try {
+                if (initialAuthToken) {
+                  await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                  await signInAnonymously(auth);
+                }
+              } catch (authError) {
+                console.error("Authentication error:", authError);
+                statusBar.textContent = "Error: Could not authenticate.";
+              }
+            }
+          });
+          
+          // Start local camera immediately for the doctor
+          await startCamera();
+
+          // Setup event listeners
+          openRoomButton.onclick = openWaitingRoom;
+          hangUpButton.onclick = hangUp;
+
+        } catch (e) {
+          console.error('Initialization failed:', e);
+          statusBar.textContent = 'Error: Failed to initialize application.';
+        }
+      }
+      
+      /**
+       * 1. Start Camera (Doctor)
+       */
+      async function startCamera() {
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+          localVideo.srcObject = localStream;
+        } catch (e) {
+          console.error('Error starting camera:', e);
+          setStatus('Error: Could not start camera. Please check permissions.');
+        }
+      }
+
+      // --- UI State Management ---
+
+      function setStatus(text) {
+        statusBar.textContent = text;
+      }
+
+      // --- Core Logic ---
+
+      /**
+       * 2. Open Waiting Room
+       * Listens to the 'patients' collection for the given Room ID.
+       */
+      function openWaitingRoom() {
+        const doctorRoomId = doctorRoomIdInput.value;
+        if (!doctorRoomId) {
+          setStatus('Please enter a Room ID to open.');
+          return;
+        }
+        
+        // Stop any previous listener
+        if (patientListUnsubscribe) {
+          patientListUnsubscribe();
+        }
+
+        const patientsCollectionRef = collection(
+          db,
+          `/artifacts/${appId}/public/data/rooms/${doctorRoomId}/patients`
+        );
+        
+        setStatus(`Waiting room '${doctorRoomId}' is open.`);
+        doctorRoomIdInput.disabled = true;
+        openRoomButton.disabled = true;
+        openRoomButton.textContent = 'Room Open';
+        openRoomButton.classList.add('bg-gray-400');
+
+        // Listen for patients
+        patientListUnsubscribe = onSnapshot(patientsCollectionRef, (snapshot) => {
+          if (snapshot.empty) {
+            patientList.innerHTML = ''; // Clear list
+            patientList.appendChild(noPatientsMessage); // Show 'no patients'
+            return;
+          }
+          
+          noPatientsMessage.remove(); // Hide 'no patients'
+          patientList.innerHTML = ''; // Clear list to rebuild
+
+          snapshot.forEach((doc) => {
+            const patient = doc.data();
+            if (patient.status === 'waiting' || patient.status === 'ringing') {
+              createPatientListItem(patient);
+            }
+          });
+        });
+      }
+
+      /**
+       * 3. Create Patient List Item
+       * Dynamically creates the UI for a waiting patient.
+       */
+      function createPatientListItem(patient) {
+        const item = document.createElement('div');
+        item.className = 'p-3 bg-slate-50 rounded-lg shadow flex items-center justify-between';
+        
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'font-medium text-gray-800';
+        nameSpan.textContent = patient.name;
+        
+        const callButton = document.createElement('button');
+        callButton.textContent = 'Call';
+        callButton.className = 'bg-green-500 text-white font-bold py-1 px-3 rounded-lg hover:bg-green-600 transition duration-300';
+        callButton.onclick = () => startCall(patient);
+        
+        if (patient.status === 'ringing') {
+           callButton.textContent = 'Ringing...';
+           callButton.disabled = true;
+           callButton.classList.add('bg-gray-400');
+        }
+
+        item.appendChild(nameSpan);
+        item.appendChild(callButton);
+        patientList.appendChild(item);
+      }
+      
+      /**
+       * 4. Start Call
+       * Doctor initiates the call to a patient.
+       */
+      async function startCall(patient) {
+        if (pc) {
+          console.warn("Already in a call. Please hang up first.");
+          setStatus("Already in a call. Please hang up first.");
+          return;
+        }
+        
+        console.log(`Calling patient: ${patient.name}`);
+        hangUpButton.disabled = false;
+        remoteVideoLabel.textContent = `${patient.name}'s Camera`;
+        
+        // Get patient's doc ref
+        const doctorRoomId = doctorRoomIdInput.value;
+        currentPatientDocRef = doc(
+          db,
+          `/artifacts/${appId}/public/data/rooms/${doctorRoomId}/patients/${patient.patientId}`
+        );
+
+        // Initialize WebRTC
+        pc = new RTCPeerConnection(servers);
+        remoteStream = new MediaStream();
+        pc.ontrack = (event) => {
+          console.log('Received remote track');
+          event.streams[0]
+            .getTracks()
+            .forEach((track) => remoteStream.addTrack(track));
+          remoteVideo.srcObject = remoteStream;
+        };
+
+        // Add local tracks
+        localStream
+          .getTracks()
+          .forEach((track) => pc.addTrack(track, localStream));
+
+        // Handle ICE candidates
+        const doctorCandidatesRef = collection(currentPatientDocRef, 'doctorIceCandidates');
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log('Generated ICE candidate:', event.candidate.toJSON());
+            addDoc(doctorCandidatesRef, event.candidate.toJSON());
+          }
+        };
+        
+        try {
+          // Create offer
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          console.log('Created offer:', offer);
+
+          // Set the offer on the patient's document
+          await updateDoc(currentPatientDocRef, {
+            status: 'ringing',
+            doctorName: doctorName,
+            offer: { type: offer.type, sdp: offer.sdp },
+          });
+          
+          setStatus(`Calling ${patient.name}...`);
+          
+          // Listen for the patient's answer
+          onSnapshot(currentPatientDocRef, async (doc) => {
+             const data = doc.data();
+             if (data && data.answer && !pc.currentRemoteDescription) {
+                console.log('Received answer');
+                const answer = new RTCSessionDescription(data.answer);
+                await pc.setRemoteDescription(answer);
+                setStatus(`Connected with ${patient.name}`);
+             }
+             
+             // Handle if patient declines
+             if (data && data.status === 'waiting' && pc.signalingState === 'have-local-offer') {
+                setStatus(`Call with ${patient.name} declined or cancelled.`);
+                hangUp();
+             }
+          });
+
+          // Listen for patient's ICE candidates
+          const patientCandidatesRef = collection(currentPatientDocRef, 'iceCandidates');
+          onSnapshot(patientCandidatesRef, (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+              if (change.type === 'added') {
+                const candidate = new RTCIceCandidate(change.doc.data());
+                try {
+                  await pc.addIceCandidate(candidate);
+                  console.log('Added patient ICE candidate');
+                } catch (e) {
+                  console.error('Error adding received ICE candidate', e);
+                }
+              }
+            });
+          });
+
+        } catch (e) {
+          console.error("Error starting call:", e);
+          setStatus("Error: Could not start call.");
+          hangUp(); // Clean up on error
+        }
+      }
+
+      /**
+       * 5. Hang Up
+       * Ends the call and cleans up resources.
+       */
+      async function hangUp() {
+        console.log('Hanging up call...');
+        
+        if (pc) {
+          pc.close();
+          pc = null;
+        }
+
+        // Don't stop local camera for doctor
+        
+        if (remoteStream) {
+          remoteStream.getTracks().forEach((track) => track.stop());
+          remoteStream = null;
+          remoteVideo.srcObject = null;
+        }
+        
+        // Delete the patient document from Firestore
+        if (currentPatientDocRef) {
+          try {
+            // First, clear subcollections
+            const doctorCandidatesRef = collection(currentPatientDocRef, 'doctorIceCandidates');
+            const patientCandidatesRef = collection(currentPatientDocRef, 'iceCandidates');
+            await clearAllIceCandidates(doctorCandidatesRef);
+            await clearAllIceCandidates(patientCandidatesRef);
+
+            // Then, delete the main document
+            await deleteDoc(currentPatientDocRef);
+            console.log('Patient document deleted.');
+          } catch (e) {
+            console.error('Error deleting patient document:', e);
+          }
+          currentPatientDocRef = null;
+        }
+
+        // Reset UI
+        setStatus('Call ended. Select a patient to call.');
+        hangUpButton.disabled = true;
+        remoteVideoLabel.textContent = "Patient's Camera";
+      }
+      
+      /**
+       * Utility to clear a subcollection
+       */
+      async function clearAllIceCandidates(collectionRef) {
+        if (!collectionRef) return;
+        try {
+          const snapshot = await getDocs(collectionRef);
+          const batch = writeBatch(db);
+          snapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+          console.log(`Cleared subcollection: ${collectionRef.path}`);
+        } catch (e) {
+          console.error(`Error clearing subcollection ${collectionRef.path}:`, e);
+        }
+      }
+
+      // --- Run Application ---
+      initialize();
+    </script>
   </body>
 </html>
-

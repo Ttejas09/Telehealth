@@ -4,77 +4,623 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Patient Portal</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="style.css" />
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Socket.IO (as in your original HTML) -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+      /* Use Inter font */
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      /* Custom styles to manage app states */
+      /* By default, hide all control groups */
+      .controls-setup,
+      .controls-waiting,
+      .controls-ringing,
+      .controls-in-call {
+        display: none;
+      }
+
+      /* Show controls based on body class */
+      .state-pre-call .controls-setup {
+        display: flex;
+      }
+      .state-waiting .controls-waiting {
+        display: block;
+      }
+      .state-ringing .controls-ringing {
+        display: block;
+      }
+      .state-in-call .controls-in-call {
+        display: block;
+      }
+
+      /* Video element styling */
+      video {
+        width: 100%;
+        height: auto;
+        border-radius: 0.5rem;
+        background-color: #334155; /* slate-700 */
+        transform: scaleX(-1); /* Mirror local video */
+      }
+      #remoteVideo {
+        transform: scaleX(-1); /* Mirror remote video as well for a natural feel */
+      }
+    </style>
   </head>
-  <!-- This 'patient-page' ID lets our script.js know what logic to run -->
-  <body id="patient-page" class="state-pre-call">
-    <header>
-      <h1>Patient Portal</h1>
+  <!-- 
+    The class on the body controls the UI state.
+    Possible states:
+    - state-pre-call: Initial state, setup controls visible
+    - state-waiting: In waiting room
+    - state-ringing: Doctor is calling
+    - state-in-call: Call is active
+  -->
+  <body id="patient-page" class="state-pre-call bg-slate-100 min-h-screen">
+    <header
+      class="bg-white shadow-md w-full p-4 flex items-center justify-between"
+    >
+      <h1 class="text-2xl font-bold text-blue-600">Patient Portal</h1>
+      <div class="text-sm text-gray-600">
+        Your ID: <span id="userId" class="font-medium text-gray-800">...</span>
+      </div>
     </header>
 
-    <main>
-      <div class="video-grid">
-        <div class="video-box">
+    <main class="container mx-auto p-4 max-w-5xl">
+      <!-- Video Grid -->
+      <div
+        class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"
+        id="video-grid"
+      >
+        <div class="video-box bg-white p-2 rounded-lg shadow">
           <video id="localVideo" muted autoplay playsinline></video>
-          <div class="video-label">Your Camera</div>
+          <div class="video-label text-center text-gray-700 font-medium mt-2">
+            Your Camera
+          </div>
         </div>
-        <div class="video-box">
+        <div class="video-box bg-white p-2 rounded-lg shadow">
           <video id="remoteVideo" autoplay playsinline></video>
-          <div class="video-label">Doctor's Camera</div>
+          <div class="video-label text-center text-gray-700 font-medium mt-2">
+            Doctor's Camera
+          </div>
         </div>
       </div>
 
-      <div class="controls-container">
-        <div id="status-bar">Please start your camera to check-in.</div>
+      <!-- Controls Container -->
+      <div
+        class="controls-container bg-white p-6 rounded-lg shadow-lg text-center"
+      >
+        <!-- Status Bar -->
+        <div
+          id="status-bar"
+          class="mb-4 text-lg font-medium text-slate-700"
+        >
+          Please start your camera to check-in.
+        </div>
 
         <!-- Step 1: Pre-call -->
-        <div class="controls-setup">
+        <div
+          class="controls-setup flex-col space-y-4 max-w-sm mx-auto"
+        >
           <input
             type="text"
             id="nameInput"
             placeholder="Enter Your Name"
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
           />
           <input
             type="text"
             id="doctorRoomIdInput"
             placeholder="Enter Doctor's Room ID"
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
           />
-          <button id="startCameraButton" class="btn btn-primary">
+          <button
+            id="startCameraButton"
+            class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-300"
+          >
             Start Camera
           </button>
-          <button id="checkInButton" class="btn btn-secondary">
+          <button
+            id="checkInButton"
+            class="w-full bg-gray-400 text-white font-bold py-2 px-4 rounded-lg cursor-not-allowed"
+            disabled
+          >
             Check-in to Waiting Room
           </button>
         </div>
 
         <!-- Step 2: Waiting -->
         <div class="controls-waiting">
-          <h2>You are in the waiting room.</h2>
-          <p>The doctor will start the call shortly.</p>
+          <h2 class="text-2xl font-semibold text-gray-800 mb-2">
+            You are in the waiting room.
+          </h2>
+          <p class="text-gray-600">The doctor will start the call shortly.</p>
+          <div
+            class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mt-4"
+          ></div>
         </div>
 
-        <!-- NEW: Step 2.5: Ringing -->
+        <!-- Step 2.5: Ringing -->
         <div class="controls-ringing">
-          <h2 id="ringing-status">The doctor is calling...</h2>
-          <button id="answerButton" class="btn btn-primary">Answer</button>
-          <button id="declineButton" class="btn btn-danger">Decline</button>
+          <h2 id="ringing-status" class="text-2xl font-semibold text-gray-800 mb-4">
+            The doctor is calling...
+          </h2>
+          <div class="flex justify-center space-x-4">
+            <button
+              id="answerButton"
+              class="bg-green-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-600 transition duration-300"
+            >
+              Answer
+            </button>
+            <button
+              id="declineButton"
+              class="bg-red-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-600 transition duration-300"
+            >
+              Decline
+            </button>
+          </div>
         </div>
-        
+
         <!-- Step 3: In Call -->
         <div class="controls-in-call">
-          <button id="hangUpButton" class="btn btn-danger">Hang Up</button>
+          <button
+            id="hangUpButton"
+            class="bg-red-500 text-white font-bold py-3 px-8 rounded-lg hover:bg-red-600 transition duration-300 text-lg"
+          >
+            Hang Up
+          </button>
         </div>
       </div>
     </main>
 
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <script src="script.js"></script>
+    <!-- 
+      This <script type="module"> block contains all the JavaScript logic 
+      for the Patient Portal, including Firebase and WebRTC.
+    -->
+    <script type="module">
+      // Import Firebase modules
+      import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+      import {
+        getAuth,
+        signInAnonymously,
+        signInWithCustomToken,
+        onAuthStateChanged,
+      } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+      import {
+        getFirestore,
+        doc,
+        setDoc,
+        onSnapshot,
+        collection,
+        addDoc,
+        updateDoc,
+        deleteDoc,
+        getDocs,
+        writeBatch,
+        setLogLevel,
+      } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+      // --- Global Variables & Config ---
+
+      // Get app ID and Firebase config from the environment
+      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+      const firebaseConfig = JSON.parse(
+        typeof __firebase_config !== 'undefined'
+          ? __firebase_config
+          : '{}'
+      );
+      const initialAuthToken =
+        typeof __initial_auth_token !== 'undefined'
+          ? __initial_auth_token
+          : null;
+
+      // Firebase services
+      let app, db, auth;
+      let userId;
+      
+      // WebRTC variables
+      let pc; // PeerConnection
+      let localStream;
+      let remoteStream;
+      let patientDocRef; // Firestore doc for this patient
+      let iceCandidatesCollectionRef;
+
+      // STUN server configuration
+      const servers = {
+        iceServers: [
+          {
+            urls: [
+              'stun:stun1.l.google.com:19302',
+              'stun:stun2.l.google.com:19302',
+            ],
+          },
+        ],
+        iceCandidatePoolSize: 10,
+      };
+
+      // DOM Elements
+      const localVideo = document.getElementById('localVideo');
+      const remoteVideo = document.getElementById('remoteVideo');
+      const startCameraButton = document.getElementById('startCameraButton');
+      const checkInButton = document.getElementById('checkInButton');
+      const nameInput = document.getElementById('nameInput');
+      const doctorRoomIdInput = document.getElementById('doctorRoomIdInput');
+      const answerButton = document.getElementById('answerButton');
+      const declineButton = document.getElementById('declineButton');
+      const hangUpButton = document.getElementById('hangUpButton');
+      const statusBar = document.getElementById('status-bar');
+      const userIdSpan = document.getElementById('userId');
+      const body = document.body;
+
+      // --- Initialization ---
+
+      async function initialize() {
+        if (Object.keys(firebaseConfig).length === 0) {
+          console.error("Firebase config is missing.");
+          statusBar.textContent = "Error: App configuration is missing.";
+          return;
+        }
+        
+        try {
+          // Initialize Firebase
+          app = initializeApp(firebaseConfig);
+          db = getFirestore(app);
+          auth = getAuth(app);
+          setLogLevel('Debug');
+          
+          // Sign in
+          onAuthStateChanged(auth, async (user) => {
+            if (user) {
+              userId = user.uid;
+              userIdSpan.textContent = userId;
+              console.log('User signed in with ID:', userId);
+            } else {
+              // No user. Try custom token or fall back to anonymous
+              try {
+                if (initialAuthToken) {
+                  await signInWithCustomToken(auth, initialAuthToken);
+                  console.log('Signed in with custom token.');
+                } else {
+                  await signInAnonymously(auth);
+                  console.log('Signed in anonymously.');
+                }
+              } catch (authError) {
+                console.error("Authentication error:", authError);
+                statusBar.textContent = "Error: Could not authenticate.";
+              }
+            }
+          });
+
+          // Setup event listeners
+          startCameraButton.onclick = startCamera;
+          checkInButton.onclick = checkIn;
+          answerButton.onclick = answerCall;
+          declineButton.onclick = declineCall;
+          hangUpButton.onclick = hangUp;
+
+        } catch (e) {
+          console.error('Initialization failed:', e);
+          statusBar.textContent = 'Error: Failed to initialize application.';
+        }
+      }
+
+      // --- UI State Management ---
+
+      function setUiState(state) {
+        body.className = `state-${state} bg-slate-100 min-h-screen`;
+        console.log(`UI state changed to: ${state}`);
+      }
+
+      function setStatus(text) {
+        statusBar.textContent = text;
+      }
+
+      // --- Core Logic ---
+
+      /**
+       * 1. Start Camera
+       * Gets local video stream and displays it.
+       */
+      async function startCamera() {
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+          localVideo.srcObject = localStream;
+          
+          // Enable check-in button
+          checkInButton.disabled = false;
+          checkInButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
+          checkInButton.classList.add('bg-green-600', 'hover:bg-green-700');
+          setStatus('Camera started. Ready to check-in.');
+          startCameraButton.disabled = true;
+          startCameraButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+
+        } catch (e) {
+          console.error('Error starting camera:', e);
+          setStatus('Error: Could not start camera. Please check permissions.');
+        }
+      }
+
+      /**
+       * 2. Check-in
+       * Creates a document in Firestore for the doctor to see.
+       */
+      async function checkIn() {
+        const patientName = nameInput.value;
+        const doctorRoomId = doctorRoomIdInput.value;
+
+        if (!patientName || !doctorRoomId || !userId) {
+          setStatus('Please enter your name and the doctor\'s Room ID.');
+          return;
+        }
+
+        try {
+          // Create a document in the doctor's room collection
+          const patientsCollectionRef = collection(
+            db,
+            `/artifacts/${appId}/public/data/rooms/${doctorRoomId}/patients`
+          );
+          
+          patientDocRef = doc(patientsCollectionRef, userId);
+          iceCandidatesCollectionRef = collection(patientDocRef, 'iceCandidates');
+
+          await setDoc(patientDocRef, {
+            name: patientName,
+            patientId: userId,
+            status: 'waiting', // 'waiting', 'ringing', 'connected'
+            timestamp: new Date(),
+          });
+
+          console.log(`Checked in as ${patientName} to room ${doctorRoomId}`);
+          setUiState('waiting');
+          setStatus('You are in the waiting room. The doctor will call soon.');
+
+          // Listen for changes to this patient's document (e.g., call offer)
+          startPatientDocListener();
+
+        } catch (e) {
+          console.error('Error checking in:', e);
+          setStatus('Error: Could not check-in. Please verify the Room ID.');
+        }
+      }
+
+      /**
+       * 3. Listen for Doctor's Call
+       * Sets up an onSnapshot listener for the patient's document.
+       */
+      function startPatientDocListener() {
+        if (!patientDocRef) return;
+
+        onSnapshot(patientDocRef, (doc) => {
+          if (!doc.exists()) {
+            console.log("Patient document deleted, likely hung up by doctor.");
+            hangUp(); // Clean up the call
+            return;
+          }
+          
+          const data = doc.data();
+          console.log('Patient doc update:', data);
+
+          // State: Doctor is calling
+          if (data.status === 'ringing' && data.offer) {
+            setUiState('ringing');
+            setStatus(`Dr. ${data.doctorName || ''} is calling...`);
+            // Create PeerConnection and handle offer
+            handleCallOffer(data.offer);
+          }
+          
+          // State: Call declined (e.g., by patient, or doctor cancelled)
+          if (data.status === 'waiting' && body.classList.contains('state-ringing')) {
+             setUiState('waiting');
+             setStatus('Call declined. Returning to waiting room.');
+             if (pc) {
+                pc.close();
+                pc = null;
+             }
+          }
+        });
+      }
+
+      /**
+       * 4. Handle Call Offer
+       * Called when the doctor sends an offer.
+       */
+      async function handleCallOffer(offer) {
+        if (pc) {
+          console.warn("PeerConnection already exists. Skipping new offer.");
+          return;
+        }
+        
+        console.log("Received call offer:", offer);
+        
+        // Initialize WebRTC connection
+        pc = new RTCPeerConnection(servers);
+
+        // Setup remote stream
+        remoteStream = new MediaStream();
+        pc.ontrack = (event) => {
+          console.log('Received remote track');
+          event.streams[0]
+            .getTracks()
+            .forEach((track) => remoteStream.addTrack(track));
+          remoteVideo.srcObject = remoteStream;
+        };
+
+        // Add local tracks to send to the doctor
+        localStream
+          .getTracks()
+          .forEach((track) => pc.addTrack(track, localStream));
+
+        // Handle ICE candidates
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log('Generated ICE candidate:', event.candidate.toJSON());
+            addDoc(iceCandidatesCollectionRef, event.candidate.toJSON());
+          }
+        };
+
+        // Set the doctor's offer as the remote description
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        
+        // Listen for the doctor's ICE candidates
+        const doctorCandidatesRef = collection(patientDocRef, 'doctorIceCandidates');
+        onSnapshot(doctorCandidatesRef, (snapshot) => {
+          snapshot.docChanges().forEach(async (change) => {
+            if (change.type === 'added') {
+              const candidate = new RTCIceCandidate(change.doc.data());
+              try {
+                await pc.addIceCandidate(candidate);
+                console.log('Added doctor ICE candidate');
+              } catch (e) {
+                console.error('Error adding received ICE candidate', e);
+              }
+            }
+          });
+        });
+      }
+
+      /**
+       * 5. Answer Call
+       * Patient accepts the call.
+       */
+      async function answerCall() {
+        if (!pc) {
+          console.error("No PeerConnection exists to answer.");
+          return;
+        }
+
+        try {
+          // Create an answer
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          console.log("Created answer:", answer);
+          
+          // Send the answer back to the doctor
+          await updateDoc(patientDocRef, {
+            answer: { type: answer.type, sdp: answer.sdp },
+            status: 'connected',
+          });
+
+          setUiState('in-call');
+          setStatus('Call connected.');
+          
+        } catch (e) {
+          console.error("Error answering call:", e);
+          setStatus("Error: Could not connect call.");
+        }
+      }
+      
+      /**
+       * 6. Decline Call
+       * Patient rejects the call.
+       */
+      async function declineCall() {
+         if (!patientDocRef) return;
+         
+         try {
+            await updateDoc(patientDocRef, {
+               status: 'waiting', // Set status back to waiting
+               offer: deleteField(), // Remove the offer
+               answer: deleteField() // Remove any answer
+            });
+            
+            if (pc) {
+               pc.close();
+               pc = null;
+            }
+            
+            // Clean up any lingering ICE candidates
+            await clearAllIceCandidates(iceCandidatesCollectionRef);
+            const doctorCandidatesRef = collection(patientDocRef, 'doctorIceCandidates');
+            await clearAllIceCandidates(doctorCandidatesRef);
+
+            setUiState('waiting');
+            setStatus('Call declined. You are back in the waiting room.');
+         } catch (e) {
+            console.error("Error declining call:", e);
+         }
+      }
+
+      /**
+       * 7. Hang Up
+       * Ends the call and cleans up resources.
+       */
+      async function hangUp() {
+        console.log('Hanging up call...');
+        
+        if (pc) {
+          pc.close();
+          pc = null;
+        }
+
+        // Stop local media
+        if (localStream) {
+          localStream.getTracks().forEach((track) => track.stop());
+          localStream = null;
+          localVideo.srcObject = null;
+        }
+
+        if (remoteStream) {
+          remoteStream.getTracks().forEach((track) => track.stop());
+          remoteStream = null;
+          remoteVideo.srcObject = null;
+        }
+        
+        // Delete the patient document from Firestore
+        if (patientDocRef) {
+          try {
+            // First, clear subcollections
+            await clearAllIceCandidates(iceCandidatesCollectionRef);
+            const doctorCandidatesRef = collection(patientDocRef, 'doctorIceCandidates');
+            await clearAllIceCandidates(doctorCandidatesRef);
+
+            // Then, delete the main document
+            await deleteDoc(patientDocRef);
+            console.log('Patient document deleted.');
+          } catch (e) {
+            console.error('Error deleting patient document:', e);
+          }
+          patientDocRef = null;
+        }
+
+        // Reset UI
+        setUiState('pre-call');
+        setStatus('Call ended. Please start your camera to check-in again.');
+        startCameraButton.disabled = false;
+        startCameraButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
+        checkInButton.disabled = true;
+        checkInButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+        checkInButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+        nameInput.value = '';
+        doctorRoomIdInput.value = '';
+      }
+
+      /**
+       * Utility to clear a subcollection
+       */
+      async function clearAllIceCandidates(collectionRef) {
+        if (!collectionRef) return;
+        try {
+          const snapshot = await getDocs(collectionRef);
+          const batch = writeBatch(db);
+          snapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+          console.log(`Cleared subcollection: ${collectionRef.path}`);
+        } catch (e) {
+          console.error(`Error clearing subcollection ${collectionRef.path}:`, e);
+        }
+      }
+      
+      // --- Run Application ---
+      initialize();
+
+    </script>
   </body>
 </html>
-
