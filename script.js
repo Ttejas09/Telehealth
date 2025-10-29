@@ -1,6 +1,10 @@
 // --- Connect to Socket.IO Server ---
-// --- CHANGE THIS: Replace 'localhost' with your public backend URL from Render ---
-const socket = io('https://your-backend-url.onrender.com');
+// --- TODO #1: Replace 'localhost' with your public backend URL from Render ---
+const socket = io('http://localhost:4000');
+
+// --- NEW: Get Backend URL for API calls ---
+// This makes sure we call the same server our socket is on
+const BACKEND_URL = socket.io.uri; 
 
 // --- Global DOM Elements (Shared) ---
 const body = document.body;
@@ -18,23 +22,42 @@ let currentCallPartnerId; // The socket ID of the person we are in a call with
 let currentCallPartnerName; // The name of the person we are in a call with
 
 // --- WebRTC Configuration ---
-// --- ADD THIS: Fill in your TURN server credentials from Twilio ---
-const servers = {
-  iceServers: [
-    {
-      urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'],
-    },
-    // --- Add your Twilio TURN servers here ---
-    // Example:
-    // {
-    //   urls: 'turn:global.turn.twilio.com:3478?transport=udp',
-    //   username: 'YOUR_TWILIO_ACCOUNT_SID',
-    //   credential: 'YOUR_TWILIO_AUTH_TOKEN'
-    // }
-    // --- End of TURN servers ---
-  ],
-  iceCandidatePoolSize: 10,
-};
+// --- REMOVED: Credentials are no longer stored here ---
+// We will fetch this from our backend
+let iceServers = [
+  {
+    urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'],
+  },
+];
+
+
+// --- NEW: Function to fetch TURN credentials ---
+async function getIceServers() {
+  try {
+    // Call the new /api/ice-servers endpoint on our backend
+    // We use a cache-busting param just in case
+    const response = await fetch(`${BACKEND_URL}/api/ice-servers?_=${Date.now()}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch ICE servers');
+    }
+    const twilioIceServers = await response.json();
+    
+    // Combine our free STUN servers with the Twilio TURN servers
+    // Only update if we actually got servers from Twilio
+    if (twilioIceServers && twilioIceServers.length > 0) {
+      iceServers = [
+        ...iceServers, // The STUN servers
+        ...twilioIceServers, // The TURN servers from Twilio
+      ];
+    }
+    // console.log('Using ICE servers:', iceServers);
+  } catch (error) {
+    console.error(error);
+    // Don't alert, just log. The STUN servers might still work.
+    console.warn("Warning: Could not get TURN server credentials. Call may fail on some networks.");
+  }
+}
+
 
 // --- Helper Functions ---
 function setUiState(state) {
@@ -50,7 +73,7 @@ function setStatus(message) {
 async function startLocalCamera() {
   try {
     // Only get stream if we don't already have one
-    if (!localStream || localStream.getTracks().length === 0) {
+    if (!localStream || localStream.getTracks().length === 0 || localStream.getTracks().every(t => !t.enabled)) {
       localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
@@ -65,7 +88,8 @@ async function startLocalCamera() {
   }
 }
 
-function createPeerConnection(partnerSocketId, partnerName = 'User') {
+// --- MODIFIED: createPeerConnection ---
+async function createPeerConnection(partnerSocketId, partnerName = 'User') {
   // Store who we are talking to
   currentCallPartnerId = partnerSocketId;
   currentCallPartnerName = partnerName;
@@ -77,10 +101,14 @@ function createPeerConnection(partnerSocketId, partnerName = 'User') {
     return false; // Stop if camera isn't working
   }
 
-  peerConnection = new RTCPeerConnection(servers);
+  // --- NEW: Fetch latest TURN credentials ---
+  // This ensures we have credentials *before* creating the connection
+  await getIceServers();
+
+  // --- MODIFIED: Use the 'iceServers' variable ---
+  peerConnection = new RTCPeerConnection({ iceServers: iceServers });
 
   // Add local video/audio tracks to the connection
-  // Now we know localStream exists
   localStream.getTracks().forEach((track) => {
     peerConnection.addTrack(track, localStream);
   });
@@ -116,7 +144,7 @@ function createPeerConnection(partnerSocketId, partnerName = 'User') {
       peerConnection.connectionState === 'closed' ||
       peerConnection.connectionState === 'failed'
     ) {
-      if (body.className === 'state-in-call') {
+      if (body.className.includes('in-call')) {
         // Find the correct handler to reset the UI
         if(document.getElementById('doctor-page')) {
           handleDoctorCallEnd();
@@ -218,7 +246,8 @@ if (document.getElementById('doctor-page')) {
         callButton.onclick = async () => {
           // Start the call
           // --- FIX: Check the return value ---
-          const connectionStarted = createPeerConnection(patient.socketId, patient.name);
+          // --- MODIFIED: Await the async function ---
+          const connectionStarted = await createPeerConnection(patient.socketId, patient.name);
           
           // Check if peerConnection was created successfully
           if (!connectionStarted) return; 
@@ -252,6 +281,18 @@ if (document.getElementById('doctor-page')) {
     setUiState('in-call');
     setStatus(`In call with ${currentCallPartnerName || 'Patient'}`);
   });
+  
+  // --- NEW: Handle if patient declines ---
+  socket.on('call-declined-by-patient', () => {
+    setStatus('Patient declined the call. Waiting for patients...');
+    setUiState('waiting');
+    // Re-enable lobby buttons
+    const lobbyList = document.getElementById('lobbyList');
+    if (lobbyList) {
+      lobbyList.querySelectorAll('button').forEach(btn => btn.disabled = false);
+    }
+  });
+
 
   // Use the new role-specific handler
   hangUpButton.onclick = handleDoctorCallEnd;
@@ -303,6 +344,8 @@ if (document.getElementById('doctor-page')) {
     // Don't allow a call if already in one
     if (peerConnection) {
       console.warn("Already in a call, rejecting new one.");
+      // Tell doctor we are busy
+      // socket.emit('call-rejected', { toDoctorId: data.fromDoctorId, reason: 'busy' });
       return; 
     }
     
@@ -320,7 +363,8 @@ if (document.getElementById('doctor-page')) {
     incomingCallData = null; // Clear incoming call data
     
     // --- FIX: Check return value ---
-    const connectionStarted = createPeerConnection(fromDoctorId, 'Doctor');
+    // --- MODIFIED: Await the async function ---
+    const connectionStarted = await createPeerConnection(fromDoctorId, 'Doctor');
     if (!connectionStarted) {
       setUiState('waiting'); // Go back to waiting if camera fails
       return; 
@@ -343,8 +387,8 @@ if (document.getElementById('doctor-page')) {
   // --- NEW: Handle Decline Button ---
   declineButton.onclick = () => {
     if (incomingCallData) {
-      // You could emit a 'call-rejected' signal here
-      // socket.emit('call-rejected', { toDoctorId: incomingCallData.fromDoctorId });
+      // Tell the doctor we declined
+      socket.emit('call-declined-by-patient', { toDoctorId: incomingCallData.fromDoctorId });
       incomingCallData = null;
     }
     setUiState('waiting');
@@ -356,7 +400,7 @@ if (document.getElementById('doctor-page')) {
   hangUpButton.onclick = handlePatientCallEnd;
   socket.on('call-ended', handlePatientCallEnd);
   
-  socket.on('receive-ice-candidate', (data) => {
+  socket.on('receive-HPC-candidate', (data) => {
     if (peerConnection) {
       try {
         peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));

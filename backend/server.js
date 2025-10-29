@@ -3,6 +3,11 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
+// --- NEW: Load environment variables ---
+require('dotenv').config(); 
+// --- NEW: Import Twilio ---
+const twilio = require('twilio');
+
 const app = express();
 const server = http.createServer(app);
 
@@ -13,10 +18,39 @@ const io = new Server(server, {
   },
 });
 
-// This will store our waiting rooms.
-// In a real app, this would be a database.
-// Format: { 'doctorRoomId': [ { patientId: 'socket-id', name: 'John Doe' }, ... ] }
-const lobbies = {};
+// --- NEW: Securely get Twilio credentials from .env or Render ---
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+// --- NEW: Create a Twilio client ---
+// Only create the client if credentials are provided
+let twilioClient;
+if (accountSid && authToken) {
+  twilioClient = twilio(accountSid, authToken);
+} else {
+  console.warn('Twilio credentials not found. TURN server will not be available.');
+}
+
+// --- NEW: API Endpoint for Frontend ---
+// This is a new route your frontend will call
+app.get('/api/ice-servers', async (req, res) => {
+  if (!twilioClient) {
+    // If Twilio isn't set up, just return an empty array
+    // The frontend will still use the public STUN servers
+    return res.json([]);
+  }
+  
+  try {
+    // Ask Twilio to generate temporary TURN server credentials
+    const token = await twilioClient.tokens.create();
+    // Send them to the frontend
+    res.json(token.iceServers);
+  } catch (error) {
+    console.error('Error fetching Twilio ICE servers:', error);
+    res.status(500).json({ error: 'Failed to get ICE servers' });
+  }
+});
+
 
 console.log('Server starting...');
 

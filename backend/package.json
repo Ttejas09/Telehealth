@@ -1,0 +1,15 @@
+{
+  "name": "telehealth-backend",
+  "version": "1.0.0",
+  "description": "Signaling server for WebRTC telehealth app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "twilio": "^5.2.0",
+    "dotenv": "^16.4.5"
+  }
+}
