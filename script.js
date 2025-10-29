@@ -1,6 +1,6 @@
 // --- Connect to Socket.IO Server ---
 // --- TODO #1: Replace 'localhost' with your public backend URL from Render ---
-const socket = io('http://localhost:4000');
+const socket = io('https://telehealth-lxj1.onrender.com');
 
 // --- NEW: Get Backend URL for API calls ---
 // This makes sure we call the same server our socket is on
